@@ -1,0 +1,6 @@
+httpx>=0.27
+psycopg[binary]>=3.1,<4
+python-dotenv>=1.0
+# 로컬 상주 모드(python -m app.main run)에서만 쓴다.
+# Vercel 배포본은 Cron 이 대신하므로 필요 없다.
+APScheduler>=3.10

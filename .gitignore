@@ -1,0 +1,22 @@
+# 비밀값. Vercel 에는 환경변수로 넣는다 (커밋 금지)
+.env
+.env.local
+.env.*.local
+
+# SQLite 시절 로컬 DB. 이제 Supabase 를 쓰므로 배포본에 갈 이유가 없다.
+*.db
+*.db-journal
+
+.vercel/
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.log
+
+.vercel
+.env*
+
+# .env.example 은 값이 비어있는 템플릿이라 커밋해야 한다.
+# 위의 .env* 규칙이 이것까지 잡아가므로 되살린다.
+!.env.example

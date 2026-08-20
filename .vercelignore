@@ -1,0 +1,17 @@
+# 보관용 구버전. 루트에 두면 임포트를 가로채고, 배포본을 키우기만 한다.
+legacy/
+
+# 로컬 CLI 전용 진입점. 서버리스에서는 api/ 의 핸들러만 돈다.
+# 이걸 올리면 Vercel 의 Python 자동감지가 app/main.py 를 ASGI/WSGI 앱으로
+# 착각해서 "does not export a top-level app/application/handler" 로 빌드가
+# 깨진다. app/ 은 그쪽 관례상 예약된 이름이라 우리 패키지명과 부딪힌다.
+app/main.py
+
+# SQLite 시절 로컬 DB
+*.db
+*.db-journal
+
+*.log
+__pycache__/
+.venv/
+venv/

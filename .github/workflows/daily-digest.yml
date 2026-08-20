@@ -1,0 +1,56 @@
+# Vercel 이 막혔을 때의 1차 대피소.
+#
+# 서버가 전혀 필요 없다. 스케줄에 맞춰 컨테이너 하나 띄워 수집+발송하고 끝.
+# DB 는 이미 Supabase 라 그대로 쓴다.
+#
+# 켜는 법:
+#   1) 이 저장소를 GitHub 에 올린다
+#   2) Settings > Secrets and variables > Actions 에 secret 두 개 등록:
+#        DATABASE_URL         (Supabase Transaction pooler, 6543)
+#        TELEGRAM_BOT_TOKEN
+#      (선택) WORKNET_AUTH_KEY, SARAMIN_ACCESS_KEY, GREENHOUSE_BOARDS
+#   3) Actions 탭에서 이 워크플로를 Enable
+#
+# 한계 두 가지 — 자세한 건 PORTING.md:
+#   - 봇 명령(/keywords 등)은 처리하지 못한다. 다이제스트만 간다.
+#   - 커밋이 60일 없으면 GitHub 이 스케줄을 자동으로 끈다(메일은 온다).
+
+name: 매일 채용공고 다이제스트
+
+on:
+  schedule:
+    # UTC 23:00 = 한국 오전 8시. 여기에 8 을 적으면 오후 5시에 돈다.
+    # GitHub 스케줄도 정시를 보장하지 않는다 (혼잡 시 15분 이상 지연).
+    - cron: "0 23 * * *"
+  workflow_dispatch:        # Actions 탭에서 수동 실행용
+
+concurrency:
+  # 지연 실행이 겹쳐 두 번 도는 것을 막는다. 겹치면 중복 발송 위험.
+  group: daily-digest
+  cancel-in-progress: false
+
+jobs:
+  digest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - run: pip install -r requirements.txt
+
+      - name: 수집 + 발송
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          WORKNET_AUTH_KEY: ${{ secrets.WORKNET_AUTH_KEY }}
+          SARAMIN_ACCESS_KEY: ${{ secrets.SARAMIN_ACCESS_KEY }}
+          GREENHOUSE_BOARDS: ${{ vars.GREENHOUSE_BOARDS }}
+          TZ_NAME: Asia/Seoul
+          PYTHONIOENCODING: utf-8
+        run: python -m app.main daily
