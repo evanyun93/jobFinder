@@ -75,22 +75,43 @@ class GreenhouseSource:
         max_pages 는 인터페이스를 맞추려고 받기만 하고 쓰지 않는다.
         """
         jobs: list[Job] = []
+        failed = []
         with httpx.Client(timeout=self.timeout) as client:
             for board in self.boards:
-                try:
-                    company = self._company_name(client, board)
-                    resp = client.get(BOARD_API.format(board=board) + "/jobs",
-                                      params={"content": "true"})
-                    resp.raise_for_status()
-                    batch = self._parse(board, company, resp.json())
-                except (httpx.HTTPError, ValueError, KeyError) as e:
-                    # 한 회사가 보드를 닫아도 나머지는 계속 돈다.
-                    log.warning("greenhouse %s 실패: %s", board, e)
+                batch = self._fetch_board(client, board)
+                if batch is None:
+                    failed.append(board)
                     continue
                 log.debug("greenhouse %s: %d건", board, len(batch))
                 jobs.extend(batch)
-        log.info("greenhouse %d개 보드에서 %d건 수집", len(self.boards), len(jobs))
+        log.info("greenhouse %d개 보드에서 %d건 수집",
+                 len(self.boards) - len(failed), len(jobs))
+        if failed:
+            # 조용히 넘기면 그 회사 공고가 그날 통째로 빠진 걸 아무도 모른다.
+            log.error("greenhouse 수집 실패 보드: %s (해당 회사 공고는 오늘 누락됩니다)",
+                      ", ".join(failed))
         return jobs
+
+    def _fetch_board(self, client, board: str, attempts: int = 2):
+        """보드 하나를 가져온다. 실패하면 None.
+
+        한 번 재시도하는 이유: 실측상 이 API 는 0.2~0.5초면 응답하는데
+        가끔 읽기 타임아웃이 난다. 실패해도 다음 날 다시 잡히긴 하지만
+        (DB 에 없으니 그때 '신규'가 된다) 알림이 하루 늦고, 그 사이에 마감된
+        공고는 영영 못 본다. 한 번 더 시도하는 비용이 훨씬 싸다.
+        """
+        for i in range(attempts):
+            try:
+                company = self._company_name(client, board)
+                resp = client.get(BOARD_API.format(board=board) + "/jobs",
+                                  params={"content": "true"})
+                resp.raise_for_status()
+                return self._parse(board, company, resp.json())
+            except (httpx.HTTPError, ValueError, KeyError) as e:
+                last = (i == attempts - 1)
+                log.warning("greenhouse %s 실패%s: %s",
+                            board, "" if last else " (재시도)", e)
+        return None
 
     def _company_name(self, client, board: str) -> str:
         try:

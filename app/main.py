@@ -1,5 +1,7 @@
 """엔트리포인트 (로컬용).
 
+  python -m app.main status         지금 상태 진단 (왜 알림이 안 왔나)
+  python -m app.main probe worknet  소스 연결 진단 (키가 왜 거부되나)
   python -m app.main daily          수집 + 발송 (서버 없이 도는 배치 모드)
   python -m app.main ingest         수집만 1회
   python -m app.main digest         다이제스트만 1회
@@ -10,15 +12,15 @@
   python -m app.main webhook        봇/웹훅 현재 상태 확인
   python -m app.main run            봇 + 스케줄러 (상주형 로컬 운영)
 
-운영은 Vercel 이 맡는다: 크론이 api/cron.py 를, 웹훅이 api/telegram.py 를
-호출한다. `run` 은 웹훅이 걸려 있지 않을 때만 쓰는 예전 방식이다.
+운영은 Vercel 이 맡는다: 크론과 웹훅 모두 server.py 의 WSGI 앱이 받는다
+(/api/cron, /api/telegram). `run` 은 웹훅이 걸려 있지 않을 때만 쓰는 예전 방식이다.
 """
 from __future__ import annotations
 
 import logging
 import sys
 
-from . import bot, db, digest, telegram
+from . import bot, db, digest, matcher, telegram
 from .config import cfg
 
 # 윈도우 콘솔은 기본 코드페이지가 cp949 라 로그의 한글이 깨진다.
@@ -46,6 +48,53 @@ def _daily_job():
         digest.run_digest()
     except Exception:
         log.exception("일간 작업 실패")
+
+
+def status() -> None:
+    """지금 상태를 한 화면에. "알림이 왜 안 왔지" 를 여기서 판정한다.
+
+    발송 0건인 날은 DB 에 흔적이 안 남아서, 크론이 돌았는지 아닌지를
+    last_cron 기록 없이는 구분할 수 없다.
+    """
+    import json as _json
+
+    db.init_db()
+    raw = db.kv_get("last_cron")
+    print("=== 마지막 크론 실행 ===")
+    if not raw:
+        print("  기록 없음")
+        print("  (실행기록 기능을 넣은 뒤로 아직 한 번도 안 돌았다는 뜻입니다)")
+    else:
+        r = _json.loads(raw)
+        print("  시각   : %s UTC" % r.get("at"))
+        if r.get("ok"):
+            print("  결과   : 성공 - 신규 %s건 / %s명 발송"
+                  % (r.get("new_jobs"), r.get("sent")))
+        else:
+            print("  결과   : 실패 - %s: %s" % (r.get("error"), r.get("detail")))
+
+    with db.conn() as c:
+        row = c.execute(
+            "SELECT count(*) AS n,"
+            "       max(fetched_at AT TIME ZONE 'Asia/Seoul') AS last_fetch"
+            "  FROM jobs").fetchone()
+        d = c.execute(
+            "SELECT count(*) AS n,"
+            "       max(sent_at AT TIME ZONE 'Asia/Seoul') AS last_sent"
+            "  FROM deliveries").fetchone()
+    print("\n=== DB ===")
+    print("  jobs       : %s건 (마지막 신규 수집 %s KST)" % (row["n"], row["last_fetch"]))
+    print("  deliveries : %s건 (마지막 발송 %s KST)" % (d["n"], d["last_sent"]))
+
+    print("\n=== 지금 보낼 게 있나 ===")
+    for f in db.active_filters():
+        cand = db.unsent_jobs_for(f["user_id"])
+        hits = matcher.select_for(cand, f)
+        print("  chat %s: 후보 %d건 -> 매칭 %d건%s"
+              % (f["chat_id"], len(cand), len(hits),
+                 "  (0건이면 알림이 안 가는 게 정상입니다)" if not hits else ""))
+
+    print("\n발송 예정: 매일 08:00~08:59 KST (vercel.json 의 0 23 * * * UTC)")
 
 
 def webhook(arg: str) -> None:
@@ -138,6 +187,15 @@ def main():
     if cmd == "webhook":
         webhook(sys.argv[2] if len(sys.argv) > 2 else "")
         return
+
+    if cmd == "status":
+        status()
+        return
+
+    if cmd == "probe":
+        # DB 가 필요 없다. 키만 있으면 되므로 init_db 앞에 둔다.
+        from . import probe
+        sys.exit(probe.main(sys.argv[2] if len(sys.argv) > 2 else ""))
 
     db.init_db()
     if cmd == "run":

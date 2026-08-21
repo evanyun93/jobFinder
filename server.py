@@ -86,13 +86,33 @@ def _cron(environ, start_response):
         sent = digest.run_digest()
     except Exception as e:
         log.exception("일간 작업 실패")
+        _record_run({"ok": False, "error": type(e).__name__, "detail": str(e)[:200]})
         # 500 을 돌려줘야 Vercel 대시보드에 실패로 남는다. 조용히 200 을 주면
         # 몇 주 뒤에야 "왜 알림이 안 오지"로 알아차리게 된다.
         return _json(start_response, 500,
                      {"error": type(e).__name__, "detail": str(e)[:500]})
 
     log.info("완료: 신규 %d건 / %d명 발송", new_jobs, sent)
+    _record_run({"ok": True, "new_jobs": new_jobs, "sent": sent})
     return _json(start_response, 200, {"new_jobs": new_jobs, "sent": sent})
+
+
+def _record_run(result: dict) -> None:
+    """크론이 돌았다는 사실을 DB 에 남긴다.
+
+    발송 0건인 날은 DB 에 아무 흔적이 안 남는다 - 새 공고가 없으면 jobs 에도
+    (ON CONFLICT DO NOTHING 이라) 새 행이 안 생기고 deliveries 도 그대로다.
+    그래서 "알림이 안 왔다"가 정상 동작인지 크론이 안 돈 건지 구분할 수가 없었다.
+    Hobby 플랜은 런타임 로그도 금방 사라져서 사후 확인이 불가능하다.
+
+    기록 실패가 크론 자체를 실패시키면 안 되므로 예외는 삼킨다.
+    """
+    import datetime
+    result["at"] = datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")
+    try:
+        db.kv_set("last_cron", json.dumps(result, ensure_ascii=False))
+    except Exception:
+        log.warning("크론 실행 기록 실패 (본 작업에는 영향 없음)", exc_info=True)
 
 
 def _telegram(environ, start_response):

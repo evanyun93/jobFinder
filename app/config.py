@@ -74,7 +74,7 @@ class Config:
     # Greenhouse 공개 채용보드. 키·승인이 필요 없어 기본으로 켜둔다.
     # 보드 토큰은 기업 채용페이지 URL(boards.greenhouse.io/<토큰>)에 그대로 있다.
     greenhouse_boards: str = field(default_factory=lambda: _str(
-        "GREENHOUSE_BOARDS", "krafton,moloco,sendbird,daangn"))
+        "GREENHOUSE_BOARDS", "krafton,moloco,sendbird,daangn,seoulrobotics,databricks"))
     greenhouse_enabled: bool = field(default_factory=lambda: _bool("GREENHOUSE_ENABLED", True))
 
     digest_hour: int = field(default_factory=lambda: _int("DIGEST_HOUR", 8))
